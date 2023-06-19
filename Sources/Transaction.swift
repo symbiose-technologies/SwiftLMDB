@@ -9,8 +9,9 @@
 import Foundation
 import LMDB
 
+internal typealias Transaction = LMDB_Transaction
 /// All read and write operations on the database happen inside a Transaction.
-public struct Transaction {
+public struct LMDB_Transaction {
     
     public enum Action {
         case abort, commit

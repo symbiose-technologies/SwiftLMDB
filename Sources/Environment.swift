@@ -9,9 +9,11 @@
 import Foundation
 import LMDB
 
+internal typealias Environment = LMDB_Environment
+
 /// An environment is the base of LMDB.
 /// It is opened at a path and may contain 0 or more databases.
-public class Environment {
+public class LMDB_Environment {
     
     public struct Flags: OptionSet {
         public let rawValue: Int32
@@ -96,8 +98,14 @@ public class Environment {
     /// - parameter name: The name of the database or `nil` if the unnamed/anonymous database in the environment should be used.
     /// - note: The parameter `maxDBs` supplied when instantiating the environment determines how many named databases can be opened inside the environment.
     /// - throws: an error if operation fails. See `LMDBError`.
-    public func openDatabase(named name: String? = nil, flags: Database.Flags = []) throws -> Database {
-        return try Database(environment: self, name: name, flags: flags)
+    public func openDatabase(named name: String? = nil,
+                             flags: LMDB_Database.Flags = [],
+                             useSwiftWriteLock: Bool = false) throws -> LMDB_Database {
+        return try LMDB_Database(environment: self,
+                                 name: name,
+                                 flags: flags,
+                                 useSwiftWriteLock: useSwiftWriteLock
+        )
     }
     
 }

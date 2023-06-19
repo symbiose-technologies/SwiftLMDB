@@ -9,10 +9,12 @@
 import Foundation
 import LMDB
 
+internal typealias Database = LMDB_Database
+
 /// A database contained in an environment.
 /// The database can either be named (if maxDBs > 0 on the environment) or
 /// it can be the single anonymous/unnamed database inside the environment.
-public class Database {
+public class LMDB_Database {
     
     public struct Flags: OptionSet {
         public let rawValue: Int32
@@ -61,9 +63,21 @@ public class Database {
         
     }
     
-    /// - throws: an error if operation fails. See `LMDBError`.
-    internal init(environment: Environment, name: String?, flags: Flags = []) throws {
+    /// Swift workaround for POSIX file mutex not supported in macOS. This should only be needed
+    /// on macs
+    private let writeLock = NSLock()
 
+    public private(set) var useSwiftWriteLock: Bool
+
+    
+    /// - throws: an error if operation fails. See `LMDBError`.
+    internal init(environment: Environment,
+                  name: String?,
+                  flags: Flags = [],
+                  useSwiftWriteLock: Bool = false
+    ) throws {
+        self.useSwiftWriteLock = useSwiftWriteLock
+        
         self.environment = environment
         
         try Transaction(environment: environment) { transaction -> Transaction.Action in
@@ -152,6 +166,8 @@ public class Database {
     /// - parameter flags: An optional set of flags that modify the behavior if the put operation. Default is [] (empty set).
     /// - throws: an error if operation fails. See `LMDBError`.
     public func put<V: DataConvertible, K: DataConvertible>(value: V, forKey key: K, flags: PutFlags = []) throws {
+        if useSwiftWriteLock { writeLock.lock() }
+        defer { if useSwiftWriteLock { writeLock.unlock() } }
         
         var keyData = key.asData
         var valueData = value.asData
@@ -188,6 +204,8 @@ public class Database {
     /// - parameter key: The key identifying the database entry to be deleted. The key must conform to `DataConvertible`. Passing an empty key will cause an error to be thrown.
     /// - throws: an error if operation fails. See `LMDBError`.
     public func deleteValue<K: DataConvertible>(forKey key: K) throws {
+        if useSwiftWriteLock { writeLock.lock() }
+        defer { if useSwiftWriteLock { writeLock.unlock() } }
         
         var keyData = key.asData
         
@@ -210,6 +228,8 @@ public class Database {
     /// The database remains open after being emptied and can still be used.
     /// - throws: an error if operation fails. See `LMDBError`.
     public func empty() throws {
+        if useSwiftWriteLock { writeLock.lock() }
+        defer { if useSwiftWriteLock { writeLock.unlock() } }
         
         var dropStatus: Int32 = 0
         
@@ -229,6 +249,8 @@ public class Database {
     /// - seealso: `empty()`
     /// - throws: an error if operation fails. See `LMDBError`.
     public func drop() throws {
+        if useSwiftWriteLock { writeLock.lock() }
+        defer { if useSwiftWriteLock { writeLock.unlock() } }
         
         var dropStatus: Int32 = 0
         

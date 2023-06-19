@@ -10,6 +10,10 @@ import XCTest
 import Foundation
 @testable import SwiftLMDB
 
+typealias Environment = LMDB_Environment
+typealias Database = LMDB_Database
+
+
 class SwiftLMDBTests: XCTestCase {
 
     static let envPath: String = {
@@ -49,10 +53,16 @@ class SwiftLMDBTests: XCTestCase {
     }
     
     // MARK: - Helpers
-    private func createDatabase(named name: String, envFlags: Environment.Flags = [], dbFlags: Database.Flags = [.create]) -> Database {
+    private func createDatabase(named name: String,
+                                envFlags: Environment.Flags = [],
+                                dbFlags: Database.Flags = [.create],
+                                useSwiftWriteLocking: Bool = false
+    ) -> Database {
         do {
             let environment = try Environment(path: envPath, flags: envFlags, maxDBs: 32)
-            return try environment.openDatabase(named: name, flags: dbFlags)
+            return try environment.openDatabase(named: name,
+                                                flags: dbFlags,
+                                                useSwiftWriteLock: useSwiftWriteLocking)
         } catch {
             XCTFail(error.localizedDescription)
             fatalError()
@@ -380,6 +390,137 @@ class SwiftLMDBTests: XCTestCase {
         
     }
     
+    
+    ///MARK: Symbiose Concurrency Tests
+    func testConcurrentReads() {
+        let database = createDatabase(named: #function, envFlags: [.noLock], useSwiftWriteLocking: true)
+        
+        let value = "Hello world!"
+        let key = "concurrentReads"
+        do {
+            try database.put(value: value, forKey: key)
+        } catch {
+            XCTFail(error.localizedDescription)
+        }
+        
+        let concurrentQueue = DispatchQueue(label: "com.swiftLMDB.concurrentQueue", attributes: .concurrent)
+        let expectation = XCTestExpectation(description: "Concurrent reads from database")
+        expectation.expectedFulfillmentCount = 100
+        
+        for _ in 0..<100 {
+            concurrentQueue.async {
+                do {
+                    let fetchedValue = try database.get(type: type(of: value), forKey: key)
+                    XCTAssertEqual(value, fetchedValue)
+                    expectation.fulfill()
+                } catch {
+                    XCTFail(error.localizedDescription)
+                }
+            }
+        }
+        wait(for: [expectation], timeout: 10.0)
+    }
+
+    func testConcurrentWrites() {
+        let database = createDatabase(named: #function, envFlags: [.noLock], useSwiftWriteLocking: true)
+        
+        let concurrentQueue = DispatchQueue(label: "com.swiftLMDB.concurrentQueue", attributes: .concurrent)
+        let expectation = XCTestExpectation(description: "Concurrent writes to database")
+        expectation.expectedFulfillmentCount = 100
+        
+        for i in 0..<100 {
+            concurrentQueue.async {
+                do {
+                    try database.put(value: "value-\(i)", forKey: "key-\(i)")
+                    expectation.fulfill()
+                } catch {
+                    XCTFail(error.localizedDescription)
+                }
+            }
+        }
+        wait(for: [expectation], timeout: 10.0)
+        
+        // Test that all values were written
+        for i in 0..<100 {
+            do {
+                let value = try database.get(type: String.self, forKey: "key-\(i)")
+                XCTAssertEqual(value, "value-\(i)")
+            } catch {
+                XCTFail(error.localizedDescription)
+            }
+        }
+    }
+    
+    func testConcurrentReadsAndWrites() {
+        let database = createDatabase(named: #function, envFlags: [.noLock], useSwiftWriteLocking: true)
+        
+        let concurrentQueue = DispatchQueue(label: "com.swiftLMDB.concurrentQueue", attributes: .concurrent)
+        let writeExpectation = XCTestExpectation(description: "Concurrent writes to database")
+        writeExpectation.expectedFulfillmentCount = 100
+        
+        let readExpectation = XCTestExpectation(description: "Concurrent reads from database")
+        readExpectation.expectedFulfillmentCount = 100
+        
+        for i in 0..<100 {
+            let semaphore = DispatchSemaphore(value: 0)
+            
+            concurrentQueue.async {
+                do {
+                    try database.put(value: "value-\(i)", forKey: "key-\(i)")
+                    writeExpectation.fulfill()
+                    semaphore.signal()
+                } catch {
+                    XCTFail(error.localizedDescription)
+                }
+            }
+            
+            concurrentQueue.async {
+                semaphore.wait()
+                do {
+                    let fetchedValue = try database.get(type: String.self, forKey: "key-\(i)")
+                    XCTAssertEqual(fetchedValue, "value-\(i)")
+                    readExpectation.fulfill()
+                } catch {
+                    XCTFail(error.localizedDescription)
+                }
+            }
+        }
+        wait(for: [writeExpectation, readExpectation], timeout: 10.0)
+    }
+
+//    func testConcurrentReadsAndWrites() {
+//        let database = createDatabase(named: #function, envFlags: [.noLock], useSwiftWriteLocking: true)
+//
+//        let concurrentQueue = DispatchQueue(label: "com.swiftLMDB.concurrentQueue", attributes: .concurrent)
+//        let writeExpectation = XCTestExpectation(description: "Concurrent writes to database")
+//        writeExpectation.expectedFulfillmentCount = 100
+//
+//        let readExpectation = XCTestExpectation(description: "Concurrent reads from database")
+//        readExpectation.expectedFulfillmentCount = 100
+//
+//        for i in 0..<100 {
+//            concurrentQueue.async {
+//                do {
+//                    try database.put(value: "value-\(i)", forKey: "key-\(i)")
+//                    writeExpectation.fulfill()
+//                } catch {
+//                    XCTFail(error.localizedDescription)
+//                }
+//            }
+//
+//            concurrentQueue.async {
+//                do {
+//                    let fetchedValue = try database.get(type: String.self, forKey: "key-\(i)")
+//                    XCTAssertEqual(fetchedValue, "value-\(i)")
+//                    readExpectation.fulfill()
+//                } catch {
+//                    XCTFail(error.localizedDescription)
+//                }
+//            }
+//        }
+//        wait(for: [writeExpectation, readExpectation], timeout: 10.0)
+//    }
+    
     static var allTests : [(String, (SwiftLMDBTests) -> () throws -> Void)] {
         return [
             ("testGetLMDBVersion", testGetLMDBVersion),
@@ -391,9 +532,14 @@ class SwiftLMDBTests: XCTestCase {
             ("testDelete", testDelete),
             ("testDropDatabase", testDropDatabase),
             ("testEmptyDatabase", testEmptyDatabase),
-            ("testReadOnlyDatabase", testReadOnlyDatabase)
+            ("testReadOnlyDatabase", testReadOnlyDatabase),
+            
+            ("testCursor", testCursor),
+            
+            ("testConcurrentReads", testConcurrentReads),
+            ("testConcurrentWrites", testConcurrentWrites),
+            ("testConcurrentReadsAndWrites", testConcurrentReadsAndWrites)
         ]
     }
 
-    
 }

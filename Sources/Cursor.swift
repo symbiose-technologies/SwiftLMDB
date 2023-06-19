@@ -12,11 +12,11 @@ public class Cursor {
     
     internal private(set) var handle: OpaquePointer?
     
-    private let database: Database
-    private let transaction: Transaction
+    private let database: LMDB_Database
+    private let transaction: LMDB_Transaction
     private var first = true
     
-    internal init(database: Database, transaction: Transaction) {
+    internal init(database: LMDB_Database, transaction: LMDB_Transaction) {
         self.database = database
         self.transaction = transaction
         mdb_cursor_open(transaction.handle, database.handle, &handle)

@@ -18,6 +18,7 @@ public struct Stats {
     public let entries: Int
     
     internal init(stat: MDB_stat) {
+        
         self.pageSize = stat.ms_psize
         self.depth = stat.ms_depth
         self.branchPageCount = stat.ms_branch_pages

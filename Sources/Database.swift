@@ -166,8 +166,21 @@ public class LMDB_Database {
     /// - parameter flags: An optional set of flags that modify the behavior if the put operation. Default is [] (empty set).
     /// - throws: an error if operation fails. See `LMDBError`.
     public func put<V: DataConvertible, K: DataConvertible>(value: V, forKey key: K, flags: PutFlags = []) throws {
-        if useSwiftWriteLock { writeLock.lock() }
-        defer { if useSwiftWriteLock { writeLock.unlock() } }
+        let reqId = UUID().uuidString
+        if useSwiftWriteLock {
+//            print("\(reqId) [LMDB] useSwiftWriteLock obtaining lock...")
+            writeLock.lock()
+//            print("\(reqId) [LMDB] useSwiftWriteLock obtained lock!")
+
+        }
+        defer {
+            if useSwiftWriteLock {
+//                print("\(reqId) [LMDB] useSwiftWriteLock releasing lock...")
+                writeLock.unlock()
+//                print("\(reqId) [LMDB] useSwiftWriteLock released lock!")
+            }
+        }
+        
         
         var keyData = key.asData
         var valueData = value.asData
@@ -188,13 +201,11 @@ public class LMDB_Database {
                     
                     putStatus = mdb_put(transaction.handle, self.handle, &keyVal, &valueVal, UInt32(flags.rawValue))
                     return .commit
-                    
                 }
                 
                 guard putStatus == 0 else {
                     throw LMDBError(returnCode: putStatus)
                 }
-                
             }
         }
         
